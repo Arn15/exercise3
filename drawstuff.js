@@ -113,6 +113,16 @@ class Color {
         return(newColor);
     } // end Color clone method
     
+        // clamp all channels into [0,255] -- needed once we start summing
+        // ambient + diffuse + specular, which can easily overshoot 255
+    clamp() {
+        this.r = Math.min(255,Math.max(0,this.r));
+        this.g = Math.min(255,Math.max(0,this.g));
+        this.b = Math.min(255,Math.max(0,this.b));
+        this.a = Math.min(255,Math.max(0,this.a));
+        return(this);
+    } // end Color clamp method
+    
         // Send color to console
     toConsole() {
         console.log("rgba: "+ this.r +" "+ this.g +" "+ this.b +" "+ this.a);
@@ -294,26 +304,49 @@ function drawPixel(imagedata,x,y,color) {
 function interpRect(imagedata,top,bottom,left,right,globals,tlAttribs,trAttribs,brAttribs,blAttribs) {
     
     // shade the pixel given pixel position and interp'd attribs
-    // assumes attribs contains a "diffuse" property which is a Color object
-    // assumes all other properties are floats
-    // modifies pass image data
+    // assumes attribs contains "diffuse" and "specular" Color properties
+    // and a "shininess" float property
+    // globals carries lightPos, lightCol, eyePos, ambientCol, ka, ks
+    // modifies passed image data
     function shadePixel(imagedata,pixX,pixY,globals,attribs) {
-        var difColor = new Color();
+        var finalColor = new Color(0,0,0,255);
         var worldLoc = new Vector(pixX,pixY,0); // assume rect at z=0
-        var lVect = new Vector();
-        
-        // get light vector
-        lVect.copy(globals.lightPos);
-        lVect = Vector.subtract(lVect,worldLoc);
+        var normal = new Vector(0,0,1);         // rect lies flat in xy plane
+
+        // --- light vector, from surface point to light ---
+        var lVect = Vector.subtract(globals.lightPos,worldLoc);
         lVect = Vector.normalize(lVect);
-        var NdotL = Vector.dot(lVect,new Vector(0,0,1)); // rect in xy plane
-        
-        // calc diffuse color
-        difColor.r = attribs.diffuse.r * globals.lightCol.r/255 * NdotL;
-        difColor.g = attribs.diffuse.g * globals.lightCol.g/255 * NdotL;
-        difColor.b = attribs.diffuse.b * globals.lightCol.b/255 * NdotL;
-        
-        drawPixel(imagedata,pixX,pixY,difColor);
+        var NdotL = Math.max(0,Vector.dot(normal,lVect)); // clamp negative light
+
+        // --- ambient term: ka * lightCol * material diffuse color ---
+        var ambColor = attribs.diffuse.clone();
+        ambColor.r *= globals.ka * (globals.ambientCol.r/255);
+        ambColor.g *= globals.ka * (globals.ambientCol.g/255);
+        ambColor.b *= globals.ka * (globals.ambientCol.b/255);
+
+        // --- diffuse term: kd(=1, folded into material) * lightCol * diffuse * NdotL ---
+        var difColor = attribs.diffuse.clone();
+        difColor.r *= globals.lightCol.r/255 * NdotL;
+        difColor.g *= globals.lightCol.g/255 * NdotL;
+        difColor.b *= globals.lightCol.b/255 * NdotL;
+
+        // --- specular term: ks * lightCol * specColor * (max(R.V,0))^shininess ---
+        var eyeVect = Vector.subtract(globals.eyePos,worldLoc);
+        eyeVect = Vector.normalize(eyeVect);
+        // reflect L about N: R = 2(N.L)N - L
+        var reflect = Vector.subtract(Vector.scale(2*NdotL,normal),lVect);
+        var RdotV = Math.max(0,Vector.dot(reflect,eyeVect));
+        var specFactor = globals.ks * Math.pow(RdotV,attribs.shininess);
+        var specColor = attribs.specular.clone();
+        specColor.r *= globals.lightCol.r/255 * specFactor;
+        specColor.g *= globals.lightCol.g/255 * specFactor;
+        specColor.b *= globals.lightCol.b/255 * specFactor;
+
+        // --- sum all three terms and clamp ---
+        finalColor.add(ambColor).add(difColor).add(specColor).clamp();
+        finalColor.a = 255;
+
+        drawPixel(imagedata,pixX,pixY,finalColor);
     } // end shade pixel
     
     try {
@@ -388,15 +421,49 @@ function main() {
     var context = canvas.getContext("2d");
     var w = context.canvas.width; // as set in html
     var h = context.canvas.height;  // as set in html
-    var imagedata = context.createImageData(w,h);
- 
-    // Define a rectangle in 2D with colors and coords at corners
-    var globals = { lightPos: new Vector(100,100,50),  // light over left upper rect
-                    lightCol: new Color(255,255,255)}; // light is white
-    var tlAttribs = { diffuse: new Color(0,0,255)};    // all four rect verts blue
-    var trAttribs = { diffuse: new Color(0,0,255)};
-    var brAttribs = { diffuse: new Color(0,0,255)};
-    var blAttribs = { diffuse: new Color(0,0,255)};
-    interpRect(imagedata,50,150,50,200,globals,tlAttribs,trAttribs,brAttribs,blAttribs);
-    context.putImageData(imagedata,0,0); // display the image in the context
+
+    // Rectangle bounds -- kept fixed, only the light moves
+    var top=50, bottom=150, left=50, right=200;
+    var rectCenterX = (left+right)/2, rectCenterY = (top+bottom)/2;
+
+    // Vertex attribs: diffuse + specular colors and a shininess exponent.
+    // All four rect verts share the same blue material with a white highlight.
+    var tlAttribs = { diffuse: new Color(0,0,255), specular: new Color(255,255,255), shininess: 20 };
+    var trAttribs = { diffuse: new Color(0,0,255), specular: new Color(255,255,255), shininess: 20 };
+    var brAttribs = { diffuse: new Color(0,0,255), specular: new Color(255,255,255), shininess: 20 };
+    var blAttribs = { diffuse: new Color(0,0,255), specular: new Color(255,255,255), shininess: 20 };
+
+    // globals holds everything shadePixel needs each frame
+    var globals = {
+        lightPos:   new Vector(rectCenterX,rectCenterY,50), // updated every frame
+        lightCol:   new Color(255,255,255),                 // light is white
+        eyePos:     new Vector(rectCenterX,rectCenterY,300), // viewer looks straight down at the rect
+        ambientCol: new Color(255,255,255),                 // ambient light color
+        ka: 0.15,  // ambient coefficient
+        ks: 0.6    // specular coefficient
+    };
+
+    var frame = 0;
+
+    // one render pass with the light at its current position
+    function render() {
+        var imagedata = context.createImageData(w,h);
+        interpRect(imagedata,top,bottom,left,right,globals,tlAttribs,trAttribs,brAttribs,blAttribs);
+        context.putImageData(imagedata,0,0);
+    } // end render
+
+    // animate: sweep the light back and forth across the rectangle, and
+    // pull it much closer to the surface (z drops from 50 down to ~15)
+    // than the original single fixed light at z=50.
+    function animate() {
+        frame += 1;
+        var t = frame * 0.03;
+        globals.lightPos.x = rectCenterX + Math.sin(t) * ((right-left)/2 + 20); // sweeps past the edges
+        globals.lightPos.y = rectCenterY + Math.cos(t*0.7) * ((bottom-top)/4);
+        globals.lightPos.z = 15 + 10 * (1 - Math.abs(Math.sin(t*0.5)));         // bobs closer/farther, min z=15
+        render();
+        requestAnimationFrame(animate);
+    } // end animate
+
+    animate(); // kick off the animation loop instead of a single static render
 } // end main
