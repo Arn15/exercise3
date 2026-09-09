@@ -422,48 +422,36 @@ function main() {
     var w = context.canvas.width; // as set in html
     var h = context.canvas.height;  // as set in html
 
-    // Rectangle bounds -- kept fixed, only the light moves
-    var top=50, bottom=150, left=50, right=200;
-    var rectCenterX = (left+right)/2, rectCenterY = (top+bottom)/2;
+    // Rectangle now covers the ENTIRE canvas, so the glow fills the frame
+    // the way it does in the reference image, rather than sitting inside
+    // a small blue box.
+    var top=0, bottom=h-1, left=0, right=w-1;
 
-    // Vertex attribs: diffuse + specular colors and a shininess exponent.
-    // All four rect verts share the same blue material with a white highlight.
-    var tlAttribs = { diffuse: new Color(0,0,255), specular: new Color(255,255,255), shininess: 20 };
-    var trAttribs = { diffuse: new Color(0,0,255), specular: new Color(255,255,255), shininess: 20 };
-    var brAttribs = { diffuse: new Color(0,0,255), specular: new Color(255,255,255), shininess: 20 };
-    var blAttribs = { diffuse: new Color(0,0,255), specular: new Color(255,255,255), shininess: 20 };
+    // Vertex attribs: a violet/purple diffuse material with a white
+    // specular highlight. The purple diffuse is what tints the dark
+    // corners of the image; the white specular is what makes the hot
+    // core read as white instead of blue.
+    var tlAttribs = { diffuse: new Color(65,15,185), specular: new Color(255,255,255), shininess: 22 };
+    var trAttribs = { diffuse: new Color(65,15,185), specular: new Color(255,255,255), shininess: 22 };
+    var brAttribs = { diffuse: new Color(65,15,185), specular: new Color(255,255,255), shininess: 22 };
+    var blAttribs = { diffuse: new Color(65,15,185), specular: new Color(255,255,255), shininess: 22 };
 
-    // globals holds everything shadePixel needs each frame
+    // globals holds everything shadePixel needs
     var globals = {
-        lightPos:   new Vector(rectCenterX,rectCenterY,50), // updated every frame
-        lightCol:   new Color(255,255,255),                 // light is white
-        eyePos:     new Vector(rectCenterX,rectCenterY,300), // viewer looks straight down at the rect
-        ambientCol: new Color(255,255,255),                 // ambient light color
-        ka: 0.15,  // ambient coefficient
-        ks: 0.6    // specular coefficient
+        // light sits right-of-center and a little above the vertical
+        // midline, matching the hotspot position in the reference image
+        lightPos:   new Vector(w*0.72, h*0.46, h*0.22),
+        lightCol:   new Color(255,255,255),                  // light is white
+        // eye is placed far above the surface, close to straight overhead,
+        // so the specular hotspot lands almost directly under the light
+        eyePos:     new Vector(w/2, h/2, w*1.5),
+        ambientCol: new Color(255,255,255),                  // ambient light color
+        ka: 0.14,  // ambient coefficient -- sets how dark/purple the corners stay
+        ks: 1.3    // specular coefficient -- sets how bright/wide the white core is
     };
 
-    var frame = 0;
-
-    // one render pass with the light at its current position
-    function render() {
-        var imagedata = context.createImageData(w,h);
-        interpRect(imagedata,top,bottom,left,right,globals,tlAttribs,trAttribs,brAttribs,blAttribs);
-        context.putImageData(imagedata,0,0);
-    } // end render
-
-    // animate: sweep the light back and forth across the rectangle, and
-    // pull it much closer to the surface (z drops from 50 down to ~15)
-    // than the original single fixed light at z=50.
-    function animate() {
-        frame += 1;
-        var t = frame * 0.03;
-        globals.lightPos.x = rectCenterX + Math.sin(t) * ((right-left)/2 + 20); // sweeps past the edges
-        globals.lightPos.y = rectCenterY + Math.cos(t*0.7) * ((bottom-top)/4);
-        globals.lightPos.z = 15 + 10 * (1 - Math.abs(Math.sin(t*0.5)));         // bobs closer/farther, min z=15
-        render();
-        requestAnimationFrame(animate);
-    } // end animate
-
-    animate(); // kick off the animation loop instead of a single static render
-} // end main
+    // single static render -- no animation, to match the still reference image
+    var imagedata = context.createImageData(w,h);
+    interpRect(imagedata,top,bottom,left,right,globals,tlAttribs,trAttribs,brAttribs,blAttribs);
+    context.putImageData(imagedata,0,0);
+} 
