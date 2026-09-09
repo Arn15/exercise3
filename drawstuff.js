@@ -1,4 +1,4 @@
-/* classes */ 
+
 
 // Color constructor
 class Color {
