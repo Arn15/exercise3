@@ -1,4 +1,4 @@
-
+/* classes */ 
 
 // Color constructor
 class Color {
@@ -454,4 +454,4 @@ function main() {
     var imagedata = context.createImageData(w,h);
     interpRect(imagedata,top,bottom,left,right,globals,tlAttribs,trAttribs,brAttribs,blAttribs);
     context.putImageData(imagedata,0,0);
-} 
+} // end main
